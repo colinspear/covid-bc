@@ -1,10 +1,10 @@
 import streamlit as st
+import altair as alt
+
 # To make things easier later, we're also importing numpy and pandas for
 # working with sample data.
 import numpy as np
 import pandas as pd
-
-st.title("BC Covid Stats")
 
 CASE_DATA_URL = (
     'http://www.bccdc.ca/Health-Info-Site/Documents/BCCDC_COVID19_Dashboard_Case_Details.csv'
@@ -19,29 +19,64 @@ def load_data():
     return case_data, lab_data
 
 
-# Create a text element and let the reader know the data is loading.
-data_load_state = st.text('Loading data...')
-# Load 10,000 rows of data into the dataframe.
 case_data, lab_data = load_data()
-# Notify the reader that the data was successfully loaded.
-data_load_state.text("Loading data... Done!")
 
-#positivity = lab_data[['HA', 'Positivity']].groupby('HA').count()
-
-st.header("BC, New daily cases")
 bc_cases = case_data.groupby('Reported_Date').size()
 bc_cases = bc_cases.rename_axis('Date')
 bc_cases.name = 'New cases'
+ref_date = bc_cases.index.values[-2]
+one_week = bc_cases.index.values[-9]
 
-st.sidebar.subheader(
-    'New cases, ' + str(bc_cases.index.values[-2]) + ': ' + str(bc_cases.iloc[-2])
-)
+
+st.title("BC Covid Stats as of " + ref_date)
+
+bc_lab_data = lab_data.loc[lab_data['Region']=='BC']
+
+left_column, right_column = st.beta_columns(2)
+left_column.subheader('New cases:')
+left_column.header(str(bc_cases.iloc[-2]))
+
+avg_positivity = round(bc_lab_data.loc[(bc_lab_data['Date'] > one_week) & (bc_lab_data['Date'] <=
+                ref_date), 'Positivity'].mean(), 2)
+right_column.subheader('7-day positivity:')
+right_column.header('{0:.2%}'.format(avg_positivity/100))
+
 #st.sidebar(st.write(bc_cases[-1]))
 
-st.line_chart(bc_cases)
-st.table(bc_cases.tail(10))
+#TODO: improve chart
+st.subheader('New cases')
+bc_cases = bc_cases.reset_index()
+bc_cases['7 day rolling'] = bc_cases.rolling(window=7).mean()
+case_melt = pd.melt(
+    bc_cases, id_vars='Date', value_vars=['New cases', '7 day rolling']
+)
 
-st.table(lab_data.tail(10))
+def line_chart(df, x, y, y_title, color):
+    c = alt.Chart(df).mark_line().encode(
+        alt.X(x, axis=alt.Axis(
+                labelOverlap=True, 
+                ticks=False)),
+        alt.Y(y, axis=alt.Axis(
+                title=y_title)),
+        color=alt.Color(color, legend=alt.Legend(title=None))
+    )
+    return c
+
+c = line_chart(case_melt, 'Date', 'value', 'Count', 'variable')
+st.altair_chart(c, use_container_width=True)
+
+st.subheader('7 day rolling positivity rate')
+bc_lab_data['rolling_pos'] = bc_lab_data['Positivity'].rolling(window=7).mean()
+
+pos_melt = pd.melt(
+    bc_lab_data, id_vars=['Date'], value_vars=['Positivity', 'rolling_pos']
+)
+
+d = line_chart(pos_melt, 'Date', 'value', 'Percent', 'variable')
+st.altair_chart(d, use_container_width=True)
+
+
+st.table(lab_data.tail())
 st.table(case_data.tail())
 
 
